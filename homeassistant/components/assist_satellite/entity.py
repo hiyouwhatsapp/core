@@ -18,6 +18,7 @@ from homeassistant.components.assist_pipeline import (
     OPTION_PREFERRED,
     AudioSettings,
     PipelineEvent,
+    PipelineEventCallback,
     PipelineEventType,
     PipelineStage,
     async_get_pipeline,
@@ -447,8 +448,10 @@ class AssistSatelliteEntity(entity.Entity):
         wake_word_phrase: str | None = None,
         *,
         context: Context | None = None,
+        event_callback: PipelineEventCallback | None = None,
     ) -> None:
         """Triggers an Assist pipeline in Home Assistant from a satellite."""
+        event_callback = event_callback or self._internal_on_pipeline_event
         await self._cancel_running_pipeline()
 
         # Consume system prompt in first pipeline
@@ -480,7 +483,7 @@ class AssistSatelliteEntity(entity.Entity):
                 )
             else:
                 self._wake_word_intercept_future.set_result(wake_word_phrase)
-            self._internal_on_pipeline_event(PipelineEvent(PipelineEventType.RUN_END))
+            event_callback(PipelineEvent(PipelineEventType.RUN_END))
             return
 
         if (self._ask_question_future is not None) and (
@@ -510,7 +513,7 @@ class AssistSatelliteEntity(entity.Entity):
                     async_pipeline_from_audio_stream(
                         self.hass,
                         context=context,
-                        event_callback=self._internal_on_pipeline_event,
+                        event_callback=event_callback,
                         stt_metadata=stt.SpeechMetadata(
                             language="",  # set in async_pipeline_from_audio_stream
                             format=stt.AudioFormats.WAV,

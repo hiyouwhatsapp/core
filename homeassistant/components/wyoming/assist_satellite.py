@@ -114,6 +114,7 @@ class WyomingAssistSatellite(WyomingSatelliteEntity, AssistSatelliteEntity):
         self._pipeline_ended_event = asyncio.Event()
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._pipeline_id: str | None = None
+        self._pipeline_token: object | None = None
         self._muted_changed_event = asyncio.Event()
 
         self._conversation_id: str | None = None
@@ -747,8 +748,17 @@ class WyomingAssistSatellite(WyomingSatelliteEntity, AssistSatelliteEntity):
         if end_stage is None:
             raise ValueError(f"Invalid end stage: {end_stage}")
 
-        # We will push audio in through a queue
-        self._audio_queue = asyncio.Queue()
+        # Keep the previous stream bound to its own queue.
+        self._audio_queue.put_nowait(None)
+        audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._audio_queue = audio_queue
+
+        pipeline_token = object()
+        self._pipeline_token = pipeline_token
+
+        def handle_pipeline_event(event: PipelineEvent) -> None:
+            if self._pipeline_token is pipeline_token:
+                self._internal_on_pipeline_event(event)
 
         self._is_pipeline_running = True
         self._pipeline_error = False
@@ -756,10 +766,11 @@ class WyomingAssistSatellite(WyomingSatelliteEntity, AssistSatelliteEntity):
         self.config_entry.async_create_background_task(
             self.hass,
             self.async_accept_pipeline_from_satellite(
-                audio_stream=self._stt_stream(),
+                audio_stream=self._stt_stream(audio_queue),
                 start_stage=start_stage,
                 end_stage=end_stage,
                 wake_word_phrase=wake_word_phrase,
+                event_callback=handle_pipeline_event,
             ),
             "wyoming satellite pipeline",
         )
@@ -880,10 +891,12 @@ class WyomingAssistSatellite(WyomingSatelliteEntity, AssistSatelliteEntity):
                 name="wyoming TTS timeout",
             )
 
-    async def _stt_stream(self) -> AsyncGenerator[bytes]:
+    async def _stt_stream(
+        self, audio_queue: asyncio.Queue[bytes | None]
+    ) -> AsyncGenerator[bytes]:
         """Yield audio chunks from a queue."""
         is_first_chunk = True
-        while chunk := await self._audio_queue.get():
+        while chunk := await audio_queue.get():
             if chunk is None:
                 break
 

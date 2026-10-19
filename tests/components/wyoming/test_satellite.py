@@ -1,7 +1,7 @@
 """Test Wyoming satellite."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterable, Callable
 import io
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -453,6 +453,133 @@ async def test_satellite_pipeline(hass: HomeAssistant) -> None:
         # Stop the satellite
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize(
+    ("stale_event_type", "stale_event_data"),
+    [
+        pytest.param(assist_pipeline.PipelineEventType.RUN_END, None, id="run-end"),
+        pytest.param(
+            assist_pipeline.PipelineEventType.ERROR,
+            {"code": "stale-error", "message": "Old pipeline failed"},
+            id="error",
+        ),
+    ],
+)
+async def test_satellite_superseded_pipeline_events(
+    hass: HomeAssistant,
+    stale_event_type: assist_pipeline.PipelineEventType,
+    stale_event_data: dict[str, str] | None,
+) -> None:
+    """A cancelled pipeline must not change the state of its replacement."""
+    assert await async_setup_component(hass, assist_pipeline.DOMAIN, {})
+
+    incoming_events: asyncio.Queue[Event] = asyncio.Queue()
+
+    class QueuedSatelliteClient(SatelliteAsyncTcpClient):
+        async def read_event(self) -> Event | None:
+            return await incoming_events.get()
+
+    client = QueuedSatelliteClient([])
+    first_started = asyncio.Event()
+    first_cancelled = asyncio.Event()
+    second_started = asyncio.Event()
+    second_received_audio = asyncio.Event()
+    allow_second_to_finish = asyncio.Event()
+    second_finished = asyncio.Event()
+    pipeline_callbacks: list[Callable[[assist_pipeline.PipelineEvent], None]] = []
+
+    async def mock_pipeline(
+        _hass: HomeAssistant,
+        *,
+        event_callback: Callable[[assist_pipeline.PipelineEvent], None],
+        stt_stream: AsyncIterable[bytes],
+        **_kwargs: Any,
+    ) -> None:
+        pipeline_callbacks.append(event_callback)
+        if len(pipeline_callbacks) == 1:
+            first_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                # The real pipeline emits RUN_END while being cancelled.
+                event_callback(
+                    assist_pipeline.PipelineEvent(assist_pipeline.PipelineEventType.RUN_END)
+                )
+                first_cancelled.set()
+                raise
+        else:
+            second_started.set()
+            async for chunk in stt_stream:
+                if chunk:
+                    second_received_audio.set()
+                    break
+            await allow_second_to_finish.wait()
+            event_callback(
+                assist_pipeline.PipelineEvent(assist_pipeline.PipelineEventType.RUN_END)
+            )
+            second_finished.set()
+
+    run_request = RunPipeline(
+        start_stage=PipelineStage.ASR, end_stage=PipelineStage.TTS
+    ).event()
+
+    with (
+        patch(
+            "homeassistant.components.wyoming.data.load_wyoming_info",
+            return_value=SATELLITE_INFO,
+        ),
+        patch(
+            "homeassistant.components.wyoming.assist_satellite.AsyncTcpClient", client
+        ),
+        patch(
+            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
+            mock_pipeline,
+        ),
+    ):
+        entry = await setup_config_entry(hass)
+        device: SatelliteDevice = entry.runtime_data.device
+        assert device is not None
+
+        incoming_events.put_nowait(run_request)
+        async with asyncio.timeout(5):
+            await first_started.wait()
+
+        incoming_events.put_nowait(run_request)
+        async with asyncio.timeout(5):
+            await first_cancelled.wait()
+            await second_started.wait()
+
+        assert len(pipeline_callbacks) == 2
+        pipeline_callbacks[0](
+            assist_pipeline.PipelineEvent(stale_event_type, stale_event_data)
+        )
+
+        pipeline_callbacks[1](
+            assist_pipeline.PipelineEvent(
+                assist_pipeline.PipelineEventType.STT_START,
+                {"metadata": {"language": "en"}},
+            )
+        )
+        async with asyncio.timeout(5):
+            await client.transcribe_event.wait()
+        assert device.is_active
+
+        incoming_events.put_nowait(
+            AudioChunk(rate=16000, width=2, channels=1, audio=bytes(2048)).event()
+        )
+        async with asyncio.timeout(5):
+            await second_received_audio.wait()
+        assert not client.error_event.is_set()
+
+        allow_second_to_finish.set()
+        async with asyncio.timeout(5):
+            await second_finished.wait()
+        assert not device.is_active
+
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert not client.error_event.is_set()
 
 
 async def test_satellite_pipeline_error_no_restart(hass: HomeAssistant) -> None:
