@@ -29,7 +29,11 @@ from homeassistant.components.wyoming.assist_satellite import WyomingAssistSatel
 from homeassistant.components.wyoming.devices import SatelliteDevice
 from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant, State
-from homeassistant.helpers import entity_registry as er, intent as intent_helper
+from homeassistant.helpers import (
+    entity_platform,
+    entity_registry as er,
+    intent as intent_helper,
+)
 from homeassistant.setup import async_setup_component
 
 from . import SATELLITE_INFO, WAKE_WORD_INFO, MockAsyncTcpClient
@@ -999,9 +1003,12 @@ async def test_on_pipeline_event_ignores_disconnected_client(
             await mock_client.run_satellite_event.wait()
 
         event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
-        # event_callback is the base class's bound _internal_on_pipeline_event,
-        # so we can reach the satellite entity from there.
-        satellite: WyomingAssistSatellite = event_callback.__self__
+        satellite = next(
+            entity
+            for platform in entity_platform.async_get_platforms(hass, DOMAIN)
+            for entity in platform.entities.values()
+            if isinstance(entity, WyomingAssistSatellite)
+        )
 
         # Simulate the disconnect race: the pipeline is still firing events
         # but the TCP client has already been torn down.
