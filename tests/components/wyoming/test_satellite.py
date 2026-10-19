@@ -504,7 +504,9 @@ async def test_satellite_superseded_pipeline_events(
             except asyncio.CancelledError:
                 # The real pipeline emits RUN_END while being cancelled.
                 event_callback(
-                    assist_pipeline.PipelineEvent(assist_pipeline.PipelineEventType.RUN_END)
+                    assist_pipeline.PipelineEvent(
+                        assist_pipeline.PipelineEventType.RUN_END
+                    )
                 )
                 first_cancelled.set()
                 raise
@@ -533,7 +535,8 @@ async def test_satellite_superseded_pipeline_events(
             "homeassistant.components.wyoming.assist_satellite.AsyncTcpClient", client
         ),
         patch(
-            "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
+            "homeassistant.components.assist_satellite.entity."
+            "async_pipeline_from_audio_stream",
             mock_pipeline,
         ),
     ):
