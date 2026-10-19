@@ -1141,7 +1141,7 @@ async def test_announce_raises_when_client_disconnected(
         patch(
             "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
             wraps=_async_pipeline_from_audio_stream,
-        ) as mock_run_pipeline,
+        ),
     ):
         await setup_config_entry(hass)
 
@@ -1150,7 +1150,6 @@ async def test_announce_raises_when_client_disconnected(
             await mock_client.connect_event.wait()
             await mock_client.run_satellite_event.wait()
 
-        event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
         satellite = get_satellite(hass)
         satellite._client = None
 
@@ -1193,7 +1192,7 @@ async def test_stream_tts_noop_when_client_disconnected(
         patch(
             "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
             wraps=_async_pipeline_from_audio_stream,
-        ) as mock_run_pipeline,
+        ),
     ):
         await setup_config_entry(hass)
 
@@ -1202,7 +1201,6 @@ async def test_stream_tts_noop_when_client_disconnected(
             await mock_client.connect_event.wait()
             await mock_client.run_satellite_event.wait()
 
-        event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
         satellite = get_satellite(hass)
         satellite._client = None
 
@@ -1237,7 +1235,7 @@ async def test_handle_timer_noop_when_client_disconnected(
         patch(
             "homeassistant.components.assist_satellite.entity.async_pipeline_from_audio_stream",
             wraps=_async_pipeline_from_audio_stream,
-        ) as mock_run_pipeline,
+        ),
     ):
         await setup_config_entry(hass)
 
@@ -1246,7 +1244,6 @@ async def test_handle_timer_noop_when_client_disconnected(
             await mock_client.connect_event.wait()
             await mock_client.run_satellite_event.wait()
 
-        event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
         satellite = get_satellite(hass)
         satellite._client = None
 
