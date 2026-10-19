@@ -62,6 +62,16 @@ async def setup_config_entry(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
+def get_satellite(hass: HomeAssistant) -> WyomingAssistSatellite:
+    """Return the active Wyoming Assist satellite."""
+    return next(
+        entity
+        for platform in entity_platform.async_get_platforms(hass, DOMAIN)
+        for entity in platform.entities.values()
+        if isinstance(entity, WyomingAssistSatellite)
+    )
+
+
 def get_test_wav(chunk_copies: int = 1) -> bytes:
     """Get bytes for test WAV file."""
     with io.BytesIO() as wav_io:
@@ -1003,12 +1013,7 @@ async def test_on_pipeline_event_ignores_disconnected_client(
             await mock_client.run_satellite_event.wait()
 
         event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
-        satellite = next(
-            entity
-            for platform in entity_platform.async_get_platforms(hass, DOMAIN)
-            for entity in platform.entities.values()
-            if isinstance(entity, WyomingAssistSatellite)
-        )
+        satellite = get_satellite(hass)
 
         # Simulate the disconnect race: the pipeline is still firing events
         # but the TCP client has already been torn down.
@@ -1146,7 +1151,7 @@ async def test_announce_raises_when_client_disconnected(
             await mock_client.run_satellite_event.wait()
 
         event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
-        satellite: WyomingAssistSatellite = event_callback.__self__
+        satellite = get_satellite(hass)
         satellite._client = None
 
         with pytest.raises(ConnectionError, match="not connected"):
@@ -1198,7 +1203,7 @@ async def test_stream_tts_noop_when_client_disconnected(
             await mock_client.run_satellite_event.wait()
 
         event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
-        satellite: WyomingAssistSatellite = event_callback.__self__
+        satellite = get_satellite(hass)
         satellite._client = None
 
         # Should return immediately without touching the stream object
@@ -1242,7 +1247,7 @@ async def test_handle_timer_noop_when_client_disconnected(
             await mock_client.run_satellite_event.wait()
 
         event_callback = mock_run_pipeline.call_args.kwargs["event_callback"]
-        satellite: WyomingAssistSatellite = event_callback.__self__
+        satellite = get_satellite(hass)
         satellite._client = None
 
         # Should not raise
