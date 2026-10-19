@@ -568,9 +568,23 @@ async def test_satellite_superseded_pipeline_events(
             await second_started.wait()
 
         assert len(pipeline_callbacks) == 2
+        satellite = get_satellite(hass)
+        assert satellite._is_pipeline_running
+        assert not satellite._pipeline_ended_event.is_set()
+
+        pipeline_callbacks[1](
+            assist_pipeline.PipelineEvent(
+                assist_pipeline.PipelineEventType.RUN_START,
+                {"tts_output": {"token": "current-run-token"}},
+            )
+        )
         pipeline_callbacks[0](
             assist_pipeline.PipelineEvent(stale_event_type, stale_event_data)
         )
+        assert satellite._is_pipeline_running
+        assert not satellite._pipeline_error
+        assert not satellite._pipeline_ended_event.is_set()
+        assert satellite._tts_stream_token == "current-run-token"
 
         pipeline_callbacks[1](
             assist_pipeline.PipelineEvent(
@@ -593,6 +607,8 @@ async def test_satellite_superseded_pipeline_events(
         async with asyncio.timeout(5):
             await second_finished.wait()
         assert not device.is_active
+        assert not satellite._is_pipeline_running
+        assert satellite._tts_stream_token is None
 
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
